@@ -1773,19 +1773,24 @@ public:
   private:
     typedef TVec<TIntV>::TIter TIntVVecIter;
     TIntVVecIter HI;
+    TIntVVecIter SwapToHashPoint;
+    typedef THash<TInt, TIntV>::TIter TIntHVecIter;
+    TIntHVecIter HHI;
     bool isNode;
     TStr attr;
     const TNEANet *Graph;
   public:
-    TAIntVI() : HI(), attr(), Graph(NULL) { }
-    TAIntVI(const TIntVVecIter& HIter, TStr attribute, bool isEdgeIter, const TNEANet* GraphPt) : HI(HIter), attr(), Graph(GraphPt) { isNode = !isEdgeIter; attr = attribute; }
-    TAIntVI(const TAIntVI& I) : HI(I.HI), attr(I.attr), Graph(I.Graph) { isNode = I.isNode; }
-    TAIntVI& operator = (const TAIntVI& I) { HI = I.HI; Graph=I.Graph; isNode = I.isNode; attr = I.attr; return *this; }
-    bool operator < (const TAIntVI& I) const { return HI < I.HI; }
-    bool operator == (const TAIntVI& I) const { return HI == I.HI; }
+    TAIntVI() : HI(), SwapToHashPoint(), HHI(), attr(), Graph(NULL) { }
+    TAIntVI(const TIntVVecIter& HIter, const TIntVVecIter SwapPoint, const TIntHVecIter& HHIter, TStr attribute, bool isEdgeIter, const TNEANet* GraphPt) : HI(HIter), SwapToHashPoint(SwapPoint), HHI(HHIter), attr(), Graph(GraphPt) {
+      isNode = !isEdgeIter; attr = attribute;
+    }
+    TAIntVI(const TAIntVI& I) : HI(I.HI), SwapToHashPoint(I.SwapToHashPoint), HHI(I.HHI), attr(I.attr), Graph(I.Graph) { isNode = I.isNode; }
+    TAIntVI& operator = (const TAIntVI& I) { HI = I.HI; HHI = I.HHI, Graph=I.Graph; isNode = I.isNode; attr = I.attr; return *this; }
+    bool operator < (const TAIntVI& I) const { return HI == I.HI ? HHI < I.HHI : HI < I.HI; }
+    bool operator == (const TAIntVI& I) const { return HI == I.HI && HHI == I.HHI; }
     /// Returns an attribute of the node.
-    TIntV GetDat() const { return HI[0]; }
-    TAIntVI& operator++(int) { HI++; return *this; }
+    TIntV GetDat() const { return HI == SwapToHashPoint ? HI[0] : HHI.GetDat(); }
+    TAIntVI& operator++(int) { if (HI == SwapToHashPoint) {HI++;} else {HHI++;} return *this; }
     friend class TNEANet;
   };
 
@@ -1863,7 +1868,8 @@ protected:
   THash<TInt, TEdge> EdgeH;
   /// KeyToIndexType[N|E]: Key->(Type,Index).
   TStrIntPrH KeyToIndexTypeN, KeyToIndexTypeE;
-
+  /// For VecVec, HashVec: Key->(IndexVec,IndexHash), -1 if not existent
+  TStrIntPrH KeyToIndexVVIndexHVN, KeyToIndexVVIndexHVE;
   THash<TStr, TInt> IntDefaultsN, IntDefaultsE;
   THash<TStr, TStr> StrDefaultsN, StrDefaultsE;
   THash<TStr, TFlt> FltDefaultsN, FltDefaultsE;
@@ -1871,10 +1877,12 @@ protected:
   TVec<TStrV> VecOfStrVecsN, VecOfStrVecsE;
   TVec<TFltV> VecOfFltVecsN, VecOfFltVecsE;
   TVec<TVec<TIntV> > VecOfIntVecVecsN, VecOfIntVecVecsE;
+  TVec<THash<TInt, TIntV> > VecOfIntHashVecsN, VecOfIntHashVecsE;
   enum { IntType, StrType, FltType, IntVType };
 
   TAttr SAttrN;
   TAttr SAttrE;
+
 private:
   class LoadTNodeFunctor {
   public:
@@ -1898,45 +1906,80 @@ private:
       n->LoadShM(ShMin, f);
     }
   };
-  
+  TInt FindIntVVIndexN(const TStr& attr, TBool UseHash) const {
+    TInt VecVecIndex = -1;
+    TInt HashVecIndex = -1;
+    if (KeyToIndexVVIndexHVN.IsKey(attr)) {
+      TIntPr indices = KeyToIndexVVIndexHVN.GetDat(attr);
+      VecVecIndex = indices.Val1;
+      HashVecIndex = indices.Val2;
+    }
+    if (VecVecIndex == -1) {
+      if (KeyToIndexTypeN.IsKey(attr)) {
+        VecVecIndex = KeyToIndexTypeN.GetDat(attr).Val2;
+      }
+    }
+    return UseHash ? HashVecIndex : VecVecIndex;
+  }
+
+  TInt FindIntVVIndexE(const TStr& attr, TBool UseHash) const {
+    TInt VecVecIndex = -1;
+    TInt HashVecIndex = -1;
+    if (KeyToIndexVVIndexHVE.IsKey(attr)) {
+      TIntPr indices = KeyToIndexVVIndexHVE.GetDat(attr);
+      VecVecIndex = indices.Val1;
+      HashVecIndex = indices.Val2;
+    }
+    if (VecVecIndex == -1) {
+      if (KeyToIndexTypeE.IsKey(attr)) {
+        VecVecIndex = KeyToIndexTypeE.GetDat(attr).Val2;
+      }
+    }
+    return UseHash ? HashVecIndex : VecVecIndex;
+  }  
 
 public:
   TNEANet() : CRef(), MxNId(0), MxEId(0), NodeH(), EdgeH(),
-    KeyToIndexTypeN(), KeyToIndexTypeE(), IntDefaultsN(), IntDefaultsE(),
+    KeyToIndexTypeN(), KeyToIndexTypeE(), KeyToIndexVVIndexHVN(), KeyToIndexVVIndexHVE(), IntDefaultsN(), IntDefaultsE(),
     StrDefaultsN(), StrDefaultsE(), FltDefaultsN(), FltDefaultsE(),
     VecOfIntVecsN(), VecOfIntVecsE(), VecOfStrVecsN(), VecOfStrVecsE(),
-    VecOfFltVecsN(), VecOfFltVecsE(),  VecOfIntVecVecsN(), VecOfIntVecVecsE(), SAttrN(), SAttrE(){ }
+    VecOfFltVecsN(), VecOfFltVecsE(),  VecOfIntVecVecsN(), VecOfIntVecVecsE(), VecOfIntHashVecsN(), VecOfIntHashVecsE(), SAttrN(), SAttrE(){ }
   /// Constructor that reserves enough memory for a graph of nodes and edges.
   explicit TNEANet(const int& Nodes, const int& Edges) : CRef(),
     MxNId(0), MxEId(0), NodeH(), EdgeH(), KeyToIndexTypeN(), KeyToIndexTypeE(),
+    KeyToIndexVVIndexHVN(), KeyToIndexVVIndexHVE(),
     IntDefaultsN(), IntDefaultsE(), StrDefaultsN(), StrDefaultsE(),
     FltDefaultsN(), FltDefaultsE(), VecOfIntVecsN(), VecOfIntVecsE(),
-    VecOfStrVecsN(), VecOfStrVecsE(), VecOfFltVecsN(), VecOfFltVecsE(), VecOfIntVecVecsN(), VecOfIntVecVecsE(), SAttrN(), SAttrE()
+    VecOfStrVecsN(), VecOfStrVecsE(), VecOfFltVecsN(), VecOfFltVecsE(), VecOfIntVecVecsN(), VecOfIntVecVecsE(), VecOfIntHashVecsN(), VecOfIntHashVecsE(), SAttrN(), SAttrE()
     { Reserve(Nodes, Edges); }
   TNEANet(const TNEANet& Graph) : MxNId(Graph.MxNId), MxEId(Graph.MxEId),
     NodeH(Graph.NodeH), EdgeH(Graph.EdgeH), KeyToIndexTypeN(), KeyToIndexTypeE(),
+    KeyToIndexVVIndexHVN(), KeyToIndexVVIndexHVE(),
     IntDefaultsN(), IntDefaultsE(), StrDefaultsN(), StrDefaultsE(),
     FltDefaultsN(), FltDefaultsE(), VecOfIntVecsN(), VecOfIntVecsE(),
-    VecOfStrVecsN(), VecOfStrVecsE(), VecOfFltVecsN(), VecOfFltVecsE(), VecOfIntVecVecsN(), VecOfIntVecVecsE(), SAttrN(), SAttrE() { }
+    VecOfStrVecsN(), VecOfStrVecsE(), VecOfFltVecsN(), VecOfFltVecsE(), VecOfIntVecVecsN(), VecOfIntVecVecsE(), VecOfIntHashVecsN(), VecOfIntHashVecsE(), SAttrN(), SAttrE() { }
   /// Constructor for loading the graph from a (binary) stream SIn.
   TNEANet(TSIn& SIn) : MxNId(SIn), MxEId(SIn), NodeH(SIn), EdgeH(SIn),
-    KeyToIndexTypeN(SIn), KeyToIndexTypeE(SIn), IntDefaultsN(SIn), IntDefaultsE(SIn),
+    KeyToIndexTypeN(SIn), KeyToIndexTypeE(SIn),
+    KeyToIndexVVIndexHVN(SIn), KeyToIndexVVIndexHVE(SIn), IntDefaultsN(SIn), IntDefaultsE(SIn),
     StrDefaultsN(SIn), StrDefaultsE(SIn), FltDefaultsN(SIn), FltDefaultsE(SIn),
     VecOfIntVecsN(SIn), VecOfIntVecsE(SIn), VecOfStrVecsN(SIn),VecOfStrVecsE(SIn),
-    VecOfFltVecsN(SIn), VecOfFltVecsE(SIn), VecOfIntVecVecsN(SIn), VecOfIntVecVecsE(SIn), SAttrN(SIn), SAttrE(SIn) { }
+    VecOfFltVecsN(SIn), VecOfFltVecsE(SIn), VecOfIntVecVecsN(SIn), VecOfIntVecVecsE(SIn), VecOfIntHashVecsN(SIn), VecOfIntHashVecsE(SIn), SAttrN(SIn), SAttrE(SIn) { }
 protected:
   TNEANet(const TNEANet& Graph, bool modeSubGraph) : MxNId(Graph.MxNId), MxEId(Graph.MxEId),
     NodeH(Graph.NodeH), EdgeH(Graph.EdgeH), KeyToIndexTypeN(), KeyToIndexTypeE(Graph.KeyToIndexTypeE),
+    KeyToIndexVVIndexHVN(), KeyToIndexVVIndexHVE(Graph.KeyToIndexVVIndexHVE),
     IntDefaultsN(Graph.IntDefaultsN), IntDefaultsE(Graph.IntDefaultsE), StrDefaultsN(Graph.StrDefaultsN), StrDefaultsE(Graph.StrDefaultsE),
     FltDefaultsN(Graph.FltDefaultsN), FltDefaultsE(Graph.FltDefaultsE), VecOfIntVecsN(Graph.VecOfIntVecsN), VecOfIntVecsE(Graph.VecOfIntVecsE),
     VecOfStrVecsN(Graph.VecOfStrVecsN), VecOfStrVecsE(Graph.VecOfStrVecsE), VecOfFltVecsN(Graph.VecOfFltVecsN), VecOfFltVecsE(Graph.VecOfFltVecsE),
-    VecOfIntVecVecsN(), VecOfIntVecVecsE(Graph.VecOfIntVecVecsE) { }
+    VecOfIntVecVecsN(), VecOfIntVecVecsE(Graph.VecOfIntVecVecsE), VecOfIntHashVecsN(), VecOfIntHashVecsE(Graph.VecOfIntHashVecsE) { }
   TNEANet(bool copyAll, const TNEANet& Graph) : MxNId(Graph.MxNId), MxEId(Graph.MxEId),
     NodeH(Graph.NodeH), EdgeH(Graph.EdgeH), KeyToIndexTypeN(Graph.KeyToIndexTypeN), KeyToIndexTypeE(Graph.KeyToIndexTypeE),
+    KeyToIndexVVIndexHVN(Graph.KeyToIndexVVIndexHVN), KeyToIndexVVIndexHVE(Graph.KeyToIndexVVIndexHVE),
     IntDefaultsN(Graph.IntDefaultsN), IntDefaultsE(Graph.IntDefaultsE), StrDefaultsN(Graph.StrDefaultsN), StrDefaultsE(Graph.StrDefaultsE),
     FltDefaultsN(Graph.FltDefaultsN), FltDefaultsE(Graph.FltDefaultsE), VecOfIntVecsN(Graph.VecOfIntVecsN), VecOfIntVecsE(Graph.VecOfIntVecsE),
     VecOfStrVecsN(Graph.VecOfStrVecsN), VecOfStrVecsE(Graph.VecOfStrVecsE), VecOfFltVecsN(Graph.VecOfFltVecsN), VecOfFltVecsE(Graph.VecOfFltVecsE),
-    VecOfIntVecVecsN(Graph.VecOfIntVecVecsN), VecOfIntVecVecsE(Graph.VecOfIntVecVecsE), SAttrN(Graph.SAttrN), SAttrE(Graph.SAttrE) { }
+    VecOfIntVecVecsN(Graph.VecOfIntVecVecsN), VecOfIntVecVecsE(Graph.VecOfIntVecVecsE), VecOfIntHashVecsN(Graph.VecOfIntHashVecsN), VecOfIntHashVecsE(Graph.VecOfIntHashVecsE), SAttrN(Graph.SAttrN), SAttrE(Graph.SAttrE) { }
   // virtual ~TNEANet() { }
 public:
   /// Saves the graph to a (binary) stream SOut. Expects data structures for sparse attributes.
@@ -1950,6 +1993,7 @@ public:
     VecOfStrVecsN.Save(SOut); VecOfStrVecsE.Save(SOut);
     VecOfFltVecsN.Save(SOut); VecOfFltVecsE.Save(SOut);
     VecOfIntVecVecsN.Save(SOut); VecOfIntVecVecsE.Save(SOut); 
+    VecOfIntHashVecsN.Save(SOut); VecOfIntVecVecsE.Save(SOut);
     SAttrN.Save(SOut); SAttrE.Save(SOut); }
   /// Saves the graph to a (binary) stream SOut. Available for backwards compatibility.
   void Save_V1(TSOut& SOut) const {
@@ -1981,6 +2025,23 @@ public:
     Graph->VecOfFltVecsN.Load(SIn); Graph->VecOfFltVecsE.Load(SIn);
     return Graph;
   }
+  /// Static constructor that loads the graph from a stream SIn and returns a pointer to it. Backwards compatible without Sparse
+  static PNEANet Load_V2(TSIn& SIn) {
+    PNEANet Graph = PNEANet(new TNEANet());
+    Graph->MxNId.Load(SIn); Graph->MxEId.Load(SIn);
+    Graph->NodeH.Load(SIn); Graph->EdgeH.Load(SIn);
+    Graph->KeyToIndexTypeN.Load(SIn); Graph->KeyToIndexTypeE.Load(SIn);
+    Graph->IntDefaultsN.Load(SIn); Graph->IntDefaultsE.Load(SIn);
+    Graph->StrDefaultsN.Load(SIn); Graph->StrDefaultsE.Load(SIn);
+    Graph->FltDefaultsN.Load(SIn); Graph->FltDefaultsE.Load(SIn);
+    Graph->VecOfIntVecsN.Load(SIn); Graph->VecOfIntVecsE.Load(SIn);
+    Graph->VecOfStrVecsN.Load(SIn); Graph->VecOfStrVecsE.Load(SIn);
+    Graph->VecOfFltVecsN.Load(SIn); Graph->VecOfFltVecsE.Load(SIn);
+    Graph->VecOfIntVecVecsN.Load(SIn); Graph->VecOfIntVecVecsE.Load(SIn);
+    Graph->SAttrN.Load(SIn); Graph->SAttrE.Load(SIn);
+    return Graph;
+  }
+
   /// load network from shared memory for this network
   void LoadNetworkShm(TShMIn& ShMin);
   /// static constructor to create and load a network from memory.
@@ -1988,6 +2049,54 @@ public:
     TNEANet* Network = new TNEANet();
     Network->LoadNetworkShm(ShMin);
     return PNEANet(Network);
+  }
+
+  void ConvertToSparse() {
+    TVec<TStrIntPr> AttributesToDel;
+    THash<TInt, TIntV> EmptyHash;
+    THash<TStr, TIntPr>::TIter iter;
+    for (iter = KeyToIndexTypeN.BegI(); !iter.IsEnd(); iter=iter.Next()) {
+      if (iter.GetDat().Val1 == IntVType) {
+        AttributesToDel.Add(TStrIntPr(iter.GetKey(), iter.GetDat().Val2));
+      }
+    }
+    TVec<TStrIntPr>::TIter viter;
+    TInt hash_index = 0;
+    for (viter = AttributesToDel.BegI(); viter < AttributesToDel.EndI(); viter++) {
+      KeyToIndexTypeN.DelKey(viter->Val1);
+      VecOfIntHashVecsN.Add(EmptyHash);
+      TInt i = viter->Val2;
+      for (int j=0; j<VecOfIntVecVecsN[i].Len(); j++) {
+        if(VecOfIntVecVecsN[i][j].Len() > 0) {
+          VecOfIntHashVecsN[hash_index].AddDat(TInt(j), VecOfIntVecVecsN[i][j]);
+        }
+      }
+      KeyToIndexVVIndexHVN.AddDat(viter->Val1, TIntPr(i, hash_index));
+      hash_index +=1;
+    }
+    VecOfIntVecVecsN.Clr();
+
+
+    AttributesToDel.Clr();
+    for (iter = KeyToIndexTypeE.BegI(); !iter.IsEnd(); iter=iter.Next()) {
+      if (iter.GetDat().Val1 == IntVType) {
+        AttributesToDel.Add(TStrIntPr(iter.GetKey(), iter.GetDat().Val2));
+      }
+    }
+    hash_index = 0;
+    for (viter = AttributesToDel.BegI(); viter < AttributesToDel.EndI(); viter++) {
+      KeyToIndexTypeE.DelKey(viter->Val1);
+      VecOfIntHashVecsE.Add(EmptyHash);
+      TInt i = viter->Val2;
+      for (int j=0; j<VecOfIntVecVecsE[i].Len(); j++) {
+        if(VecOfIntVecVecsE[i][j].Len() > 0) {
+          VecOfIntHashVecsE[hash_index].AddDat(TInt(j), VecOfIntVecVecsE[i][j]);
+        }
+      }
+      KeyToIndexVVIndexHVE.AddDat(viter->Val1, TIntPr(i, hash_index));
+      hash_index +=1;
+    }
+    VecOfIntVecVecsE.Clr();
   }
 
   /// Allows for run-time checking the type of the graph (see the TGraphFlag for flags).
@@ -2029,14 +2138,52 @@ public:
 
   /// Returns an iterator referring to the first node's int attribute.
   TAIntVI BegNAIntVI(const TStr& attr) const {
-    return TAIntVI(VecOfIntVecVecsN[KeyToIndexTypeN.GetDat(attr).Val2].BegI(), attr, false, this); }
+    TVec<TIntV>::TIter HI = NULL;
+    TVec<TIntV>::TIter SwapPoint = NULL;
+    THash<TInt, TIntV>::TIter HHI;
+    TInt VecVecIndex = FindIntVVIndexN(attr,false);
+    TInt HashVecIndex = FindIntVVIndexN(attr, true);
+    if (VecVecIndex != -1) {
+      HI = VecOfIntVecVecsN[VecVecIndex].BegI();
+      SwapPoint = VecOfIntVecVecsN[VecVecIndex].EndI();
+    }
+    if (HashVecIndex != -1) {
+      HHI = VecOfIntHashVecsN[VecVecIndex].BegI();
+    }
+    return TAIntVI(HI, SwapPoint, HHI, attr, false, this);
+  }
   /// Returns an iterator referring to the past-the-end node's attribute.
   TAIntVI EndNAIntVI(const TStr& attr) const {
-    return TAIntVI(VecOfIntVecVecsN[KeyToIndexTypeN.GetDat(attr).Val2].EndI(), attr, false, this); }
+    TVec<TIntV>::TIter HI = NULL;
+    TVec<TIntV>::TIter SwapPoint = NULL;
+    THash<TInt, TIntV>::TIter HHI;
+    TInt VecVecIndex = FindIntVVIndexN(attr,false);
+    TInt HashVecIndex = FindIntVVIndexN(attr, true);
+    if (VecVecIndex != -1) {
+      HI = VecOfIntVecVecsN[VecVecIndex].EndI();
+      SwapPoint = VecOfIntVecVecsN[VecVecIndex].EndI();
+    }
+    if (HashVecIndex != -1) {
+      HHI = VecOfIntHashVecsN[VecVecIndex].EndI();
+    }
+    return TAIntVI(HI, SwapPoint, HHI, attr, false, this);
+  }
   /// Returns an iterator referring to the node of ID NId in the graph.
   TAIntVI GetNAIntVI(const TStr& attr, const int& NId) const {
-    return TAIntVI(VecOfIntVecVecsN[KeyToIndexTypeN.GetDat(attr).Val2].GetI(NodeH.GetKeyId(NId)), attr, false, this); }
-
+    TVec<TIntV>::TIter HI = NULL;
+    TVec<TIntV>::TIter SwapPoint = NULL;
+    THash<TInt, TIntV>::TIter HHI;
+    TInt VecVecIndex = FindIntVVIndexN(attr,false);
+    TInt HashVecIndex = FindIntVVIndexN(attr, true);
+    if (VecVecIndex != -1) {
+      HI = VecOfIntVecVecsN[VecVecIndex].GetI(NodeH.GetKeyId(NId));
+      SwapPoint = VecOfIntVecVecsN[VecVecIndex].EndI();
+    }
+    if (HashVecIndex != -1) {
+      HHI = VecOfIntHashVecsN[VecVecIndex].GetI(NodeH.GetKeyId(NId));
+    }
+    return TAIntVI(HI, SwapPoint, HHI, attr, false, this);
+  }
 
   /// Returns an iterator referring to the first node's str attribute.
   TAStrI BegNAStrI(const TStr& attr) const {
@@ -2164,15 +2311,51 @@ public:
 
   /// Returns an iterator referring to the first edge's int attribute.
   TAIntVI BegEAIntVI(const TStr& attr) const {
-    return TAIntVI(VecOfIntVecVecsE[KeyToIndexTypeE.GetDat(attr).Val2].BegI(), attr, true, this);
+    TVec<TIntV>::TIter HI = NULL;
+    TVec<TIntV>::TIter SwapPoint = NULL;
+    THash<TInt, TIntV>::TIter HHI;
+    TInt VecVecIndex = FindIntVVIndexE(attr, false);
+    TInt HashVecIndex = FindIntVVIndexE(attr, true);
+    if (VecVecIndex != -1) {
+      HI = VecOfIntVecVecsE[VecVecIndex].BegI();
+      SwapPoint = VecOfIntVecVecsE[VecVecIndex].EndI();
+    }
+    if (HashVecIndex != -1) {
+      HHI = VecOfIntHashVecsE[VecVecIndex].BegI();
+    }
+    return TAIntVI(HI, SwapPoint, HHI, attr, true, this);
   }
   /// Returns an iterator referring to the past-the-end edge's attribute.
   TAIntVI EndEAIntVI(const TStr& attr) const {
-    return TAIntVI(VecOfIntVecVecsE[KeyToIndexTypeE.GetDat(attr).Val2].EndI(), attr, true, this);
+    TVec<TIntV>::TIter HI = NULL;
+    TVec<TIntV>::TIter SwapPoint = NULL;
+    THash<TInt, TIntV>::TIter HHI;
+    TInt VecVecIndex = FindIntVVIndexE(attr, false);
+    TInt HashVecIndex = FindIntVVIndexE(attr, true);
+    if (VecVecIndex != -1) {
+      HI = VecOfIntVecVecsE[VecVecIndex].EndI();
+      SwapPoint = VecOfIntVecVecsE[VecVecIndex].EndI();
+    }
+    if (HashVecIndex != -1) {
+      HHI = VecOfIntHashVecsE[VecVecIndex].EndI();
+    }
+    return TAIntVI(HI, SwapPoint, HHI, attr, true, this);
   }
   /// Returns an iterator referring to the edge of ID EId in the graph.
   TAIntVI GetEAIntVI(const TStr& attr, const int& EId) const {
-    return TAIntVI(VecOfIntVecVecsE[KeyToIndexTypeE.GetDat(attr).Val2].GetI(EdgeH.GetKeyId(EId)), attr, true, this);
+    TVec<TIntV>::TIter HI = NULL;
+    TVec<TIntV>::TIter SwapPoint = NULL;
+    THash<TInt, TIntV>::TIter HHI;
+    TInt VecVecIndex = FindIntVVIndexE(attr, false);
+    TInt HashVecIndex = FindIntVVIndexE(attr, true);
+    if (VecVecIndex != -1) {
+      HI = VecOfIntVecVecsE[VecVecIndex].GetI(EdgeH.GetKeyId(EId));
+      SwapPoint = VecOfIntVecVecsE[VecVecIndex].EndI();
+    }
+    if (HashVecIndex != -1) {
+      HHI = VecOfIntHashVecsE[VecVecIndex].GetI(EdgeH.GetKeyId(EId));
+    }
+    return TAIntVI(HI, SwapPoint, HHI, attr, true, this);
   }
 
   /// Returns an iterator referring to the first edge's str attribute.
@@ -2247,10 +2430,12 @@ public:
   bool Empty() const { return GetNodes()==0; }
   /// Deletes all nodes and edges from the graph.
   void Clr() { MxNId=0; MxEId=0; NodeH.Clr(); EdgeH.Clr();
-    KeyToIndexTypeN.Clr(); KeyToIndexTypeE.Clr(); IntDefaultsN.Clr(); IntDefaultsE.Clr();
+    KeyToIndexTypeN.Clr(); KeyToIndexTypeE.Clr(); KeyToIndexVVIndexHVN.Clr();
+    KeyToIndexVVIndexHVE.Clr(); IntDefaultsN.Clr(); IntDefaultsE.Clr();
     StrDefaultsN.Clr(); StrDefaultsE.Clr(); FltDefaultsN.Clr(); FltDefaultsE.Clr();
     VecOfIntVecsN.Clr(); VecOfIntVecsE.Clr(); VecOfStrVecsN.Clr(); VecOfStrVecsE.Clr();
     VecOfFltVecsN.Clr(); VecOfFltVecsE.Clr(); VecOfIntVecVecsN.Clr(); VecOfIntVecVecsE.Clr(); 
+    VecOfIntHashVecsN.Clr(); VecOfIntHashVecsE.Clr();
     SAttrN.Clr(); SAttrE.Clr();}
   /// Reserves memory for a graph of Nodes nodes and Edges edges.
   void Reserve(const int& Nodes, const int& Edges) {
@@ -2273,10 +2458,10 @@ public:
   int AddFltAttrDatN(const int& NId, const TFlt& value, const TStr& attr);
   /// Attribute based add function for attr to IntV value. ##TNEANet::AddIntVAttrDatN
   int AddIntVAttrDatN(const TNodeI& NodeI, const TIntV& value, const TStr& attr) { return AddIntVAttrDatN(NodeI.GetId(), value, attr); }
-  int AddIntVAttrDatN(const int& NId, const TIntV& value, const TStr& attr);
+  int AddIntVAttrDatN(const int& NId, const TIntV& value, const TStr& attr, TBool UseSparse=true);
   /// Appends value onto the TIntV attribute for the given node.
   int AppendIntVAttrDatN(const TNodeI& NodeI, const TInt& value, const TStr& attr) { return AppendIntVAttrDatN(NodeI.GetId(), value, attr); }
-  int AppendIntVAttrDatN(const int& NId, const TInt& value, const TStr& attr);
+  int AppendIntVAttrDatN(const int& NId, const TInt& value, const TStr& attr, TBool UseSparse=true);
   /// Deletes value from the TIntV attribute for the given node.
   int DelFromIntVAttrDatN(const TNodeI& NodeI, const TInt& value, const TStr& attr) { return DelFromIntVAttrDatN(NodeI.GetId(), value, attr); }
   int DelFromIntVAttrDatN(const int& NId, const TInt& value, const TStr& attr);
@@ -2291,10 +2476,10 @@ public:
   int AddFltAttrDatE(const int& EId, const TFlt& value, const TStr& attr);
   /// Attribute based add function for attr to IntV value. ##TNEANet::AddIntVAttrDatE
   int AddIntVAttrDatE(const TEdgeI& EdgeI, const TIntV& value, const TStr& attr) { return AddIntVAttrDatE(EdgeI.GetId(), value, attr); }
-  int AddIntVAttrDatE(const int& EId, const TIntV& value, const TStr& attr);
+  int AddIntVAttrDatE(const int& EId, const TIntV& value, const TStr& attr, TBool UseSparse=true);
   /// Appends value onto the TIntV attribute for the given node.
   int AppendIntVAttrDatE(const TEdgeI& EdgeI, const TInt& value, const TStr& attr) { return AppendIntVAttrDatE(EdgeI.GetId(), value, attr); }
-  int AppendIntVAttrDatE(const int& EId, const TInt& value, const TStr& attr);
+  int AppendIntVAttrDatE(const int& EId, const TInt& value, const TStr& attr, TBool UseSparse=true);
   /// Gets the value of int attr from the node attr value vector.
   TInt GetIntAttrDatN(const TNodeI& NodeI, const TStr& attr) { return GetIntAttrDatN(NodeI.GetId(), attr); }
   TInt GetIntAttrDatN(const int& NId, const TStr& attr);
@@ -2376,7 +2561,7 @@ public:
   /// Adds a new Flt node attribute to the hashmap.
   int AddFltAttrN(const TStr& attr, TFlt defaultValue=TFlt::Mn);
   /// Adds a new IntV node attribute to the hashmap.
-  int AddIntVAttrN(const TStr& attr);
+  int AddIntVAttrN(const TStr& attr, TBool UseSparse=true);
 
   /// Adds a new Int edge attribute to the hashmap.
   int AddIntAttrE(const TStr& attr, TInt defaultValue=TInt::Mn);
@@ -2385,7 +2570,7 @@ public:
   /// Adds a new Flt edge attribute to the hashmap.
   int AddFltAttrE(const TStr& attr, TFlt defaultValue=TFlt::Mn);
   /// Adds a new IntV edge attribute to the hashmap.
-  int AddIntVAttrE(const TStr& attr);
+  int AddIntVAttrE(const TStr& attr, TBool UseSparse=true);
 
   /// Removes all the values for node attr.
   int DelAttrN(const TStr& attr);
